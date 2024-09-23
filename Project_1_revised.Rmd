@@ -1,0 +1,88 @@
+---
+title: "Project1_revised"
+author: "Nwe Oo Mon (Nina)"
+date: "2024-09-22"
+output: html_document
+---
+Used text file with chess tournament results where the information has some structure [tournamentinfo](https://github.com/Nweoomon/Project1_607_092224/blob/main/tournamentinfo.txt).
+
+```{r setup}
+library(dplyr)
+library(stringr)
+library(readr)
+library(RCurl)
+library(ggplot2)
+library(tidyverse)
+
+file_path <- "C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/tournamentinfo.txt"
+chess_data <- readLines(file_path, warn = FALSE)
+# Remove separator lines and empty lines
+chess_data <- chess_data[!grepl("^[-\\s]+$", chess_data)]
+
+#Assigning Regex
+rxname <- "[[:digit:]]+[[:space:]]+[|]([:space:]+[:alpha:]+){2,}"
+rxstate <- "(?<=[:space:])[:alpha:]{2}(?=[:space:][|])"
+rxtotalpoints <-"[:digit:][:punct:][:digit:]"
+rxplayerstartingscore <- "(?<=R:[:space:]{1,2})[:digit:]+"
+rxplayersfinalscore <- "(?<=->[:space:]?)[:digit:]+"
+rxrnds <- "(?<=[:digit:][:punct:][:digit:][:space:]{1,2}[|]{1}).{40,}"
+
+#Creating Vectors
+player_name <- unlist(str_extract_all(chess_data,rxname))
+player_state <- unlist(str_extract_all(chess_data,rxstate))
+total_points <- unlist(str_extract_all(chess_data,rxtotalpoints))
+player_starting_score <- unlist(str_extract_all(chess_data,rxplayerstartingscore))
+player_final_score <- unlist(str_extract_all(chess_data,rxplayersfinalscore))
+rounds <- unlist(str_extract_all(chess_data,rxrnds))
+
+#Data frame
+chess_table <- data.frame(
+  player_name,
+  player_state,
+  player_starting_score,
+  player_final_score,
+  total_points,
+  rounds)
+
+#Rounds
+col_names <- c("round_1","round_2","round_3","round_4","round_5","round_6","round_7")
+chess_table <- chess_table%>%
+  separate(rounds,col_names,sep = "[|]")
+
+#New Data frame Transposed
+chess_pivot <- chess_table%>%
+  pivot_longer(col_names,names_to = "round",values_to = "result")
+
+result_col_names <- c("result","opp_id")
+id_col_names <- c("id","player_name")
+chess_pivot <- chess_pivot%>%
+  separate(result,result_col_names)%>%
+  separate(player_name,id_col_names, sep = " [|]")
+
+#Opponent rating
+chess_opp_table <- chess_pivot%>%
+  select(id, player_state, player_starting_score,player_final_score)%>%
+  distinct()%>%
+  rename(opp_id=id, 
+         opp_player_state = player_state ,
+         opp_player_starting_score = player_starting_score,
+         opp_player_final_score = player_final_score)
+
+chess_table_comp<- merge(chess_pivot,chess_opp_table,all = TRUE)%>%
+  mutate(starting_rating_diff = as.numeric(player_starting_score) - as.numeric(opp_player_starting_score))
+str(chess_table_comp)
+
+#Calculation
+chess_table_smry <- chess_table_comp%>%
+  mutate(opp_player_starting_score = as.numeric(opp_player_starting_score), opp_player_final_score = as.numeric(opp_player_final_score), player_starting_score = as.numeric(player_starting_score), player_final_score = as.numeric(player_final_score), id = as.integer(id), total_points = as.numeric(total_points))%>%
+  #Filter out the records with no match played
+  filter(!is.na(opp_player_state))%>%
+  #Group by player
+  group_by(id,player_name, player_state, player_starting_score,player_final_score, total_points)%>%
+  #Add average opponent rating and number of matches
+  summarise(avg_opp_starting_score = round(mean(opp_player_starting_score),2), avg_opp_final_score = round(mean(opp_player_final_score),2), num_of_matches = length(round))
+
+write.csv(chess_table_comp,"chess-table.csv", row.names = FALSE)
+write.csv(chess_table_smry,"chess-table-summary.csv", row.names = FALSE)
+```
+Generated csv file [chess-table-summary](https://github.com/Nweoomon/Project1_607_092224/blob/main/chess-table-summary.csv).
